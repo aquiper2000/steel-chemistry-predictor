@@ -1,6 +1,7 @@
 # app.py
 # Steel Chemistry + HAZ Toughness Predictor (Engineering Screening Tool)
 # Features: Multi-dataset upload (SDI + USS + additional files), robust cleaning, XGBoost, Pcm, screening CVN/CTOD, Monte Carlo
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -19,7 +20,43 @@ from scipy.stats import norm, weibull_min
 st.set_page_config(page_title="Steel Chemistry + HAZ Toughness Predictor", layout="wide")
 
 # =========================
-# Help Manual (HTML) - Enhanced
+# Login (restored to your earlier version)
+# =========================
+USERNAME = "User1_ECA"
+PASSWORD = "eca2026"   # Change this!
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+def login_page():
+    st.markdown("<h1 style='text-align: center; color: #003366;'>ECA SOLUTIONS ENGINEERING</h1>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center;'>Steel Chemistry + HAZ Toughness Predictor</h2>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        username = st.text_input("Username", value="", placeholder="*****")
+        password = st.text_input("Password", value="", type="password", placeholder="******")
+        if st.button("Login", type="primary", use_container_width=True):
+            if username == USERNAME and password == PASSWORD:
+                st.session_state.logged_in = True
+                st.rerun()
+            else:
+                st.error("Incorrect username or password")
+    st.caption("Contact: aquiles.perez@ecasolutionseng.com")
+
+if not st.session_state.logged_in:
+    login_page()
+    st.stop()
+
+col_logout = st.columns([9, 1])
+with col_logout[1]:
+    if st.button("Logout"):
+        st.session_state.logged_in = False
+        st.rerun()
+
+st.sidebar.success("✅ Logged in as User1 (ECA Solutions)")
+
+# =========================
+# Help Manual (HTML) - Enhanced (NOT REDUCED)
 # =========================
 HELP_MANUAL_HTML = """
 <!DOCTYPE html>
@@ -113,23 +150,30 @@ def estimate_cvn_screening_j(pcm_val: float, route_type: int, cfg: dict):
     base_j = 320.0 if route_type == 0 else 280.0
     pcm0 = cfg["pcm_threshold"]
     alpha = cfg["pcm_sensitivity"]
+
     haz_mult = 1.0
-    if "CGHAZ" in cfg["toughness_location"]: haz_mult *= 1.20
-    if cfg["t85"] == "Short (fast cooling)": haz_mult *= 1.25
+    if "CGHAZ" in cfg["toughness_location"]:
+        haz_mult *= 1.20
+    if cfg["t85"] == "Short (fast cooling)":
+        haz_mult *= 1.25
+
     penalty = np.exp(-alpha * max(0.0, pcm_val - pcm0) * haz_mult)
     cvn = base_j * penalty
+
     if cfg["service_env"] in ["Sour (H2S)", "Hydrogen (H2)", "NH3 / ammonia", "Mixed / not sure"]:
         cvn *= 0.90
+
     if cfg["temperature_regime"] == "Transition / mixed":
         cvn *= 0.85
     elif cfg["temperature_regime"] == "Lower shelf (cleavage risk)":
         cvn *= 0.70
+
     return float(np.clip(cvn, 15.0, 400.0))
 
 def estimate_ctod_mm_from_cvn(cvn_j: float, yield_strength_mpa: float, cfg: dict):
     if cfg["disable_toughness"]:
         return np.nan
-    k = 0.54 * cvn_j + 55.0  # Screening mapping
+    k = 0.54 * cvn_j + 55.0  # screening mapping (keep as-is)
     k_eff = k * cfg["constraint_factor"]
     E = 207000.0
     nu = 0.30
@@ -142,20 +186,26 @@ def estimate_ctod_mm_from_cvn(cvn_j: float, yield_strength_mpa: float, cfg: dict
 def monte_carlo_full(pred_mean_vec, pred_std_vec, inputs_fixed, cfg, n=10000, rng_seed=42):
     rng = np.random.default_rng(rng_seed)
     safe_std = np.maximum(np.asarray(pred_std_vec, dtype=float), 1e-6)
+
     chem = rng.normal(loc=np.asarray(pred_mean_vec, dtype=float), scale=safe_std, size=(n, 3))
-    chem[:, 0] = np.clip(chem[:, 0], 0.0, 0.20) # C
-    chem[:, 1] = np.clip(chem[:, 1], 0.0, 0.20) # Nb
-    chem[:, 2] = np.clip(chem[:, 2], 0.0, 1.50) # Si
+    chem[:, 0] = np.clip(chem[:, 0], 0.0, 0.20)  # C
+    chem[:, 1] = np.clip(chem[:, 1], 0.0, 0.20)  # Nb
+    chem[:, 2] = np.clip(chem[:, 2], 0.0, 1.50)  # Si
+
     C_sim = chem[:, 0]
     Nb_sim = chem[:, 1]
     Si_sim = chem[:, 2]
+
     Mn_in, N_in, Cr_in, Ni_in, Cu_in, Mo_in, V_in, B_in, ys_mpa, route_type = inputs_fixed
+
     pcm = np.array([calculate_pcm(C_sim[i], Si_sim[i], Mn_in, Cu_in, Cr_in, Ni_in, Mo_in, V_in, B_in) for i in range(n)])
     cvn = np.array([estimate_cvn_screening_j(pcm[i], route_type, cfg) for i in range(n)])
     ctod = np.array([estimate_ctod_mm_from_cvn(cvn[i], ys_mpa, cfg) for i in range(n)])
+
     def summarize(x):
         x = x[~np.isnan(x)]
-        if len(x) == 0: return None
+        if len(x) == 0:
+            return None
         return {
             "mean": float(np.mean(x)),
             "std": float(np.std(x, ddof=1)),
@@ -163,6 +213,7 @@ def monte_carlo_full(pred_mean_vec, pred_std_vec, inputs_fixed, cfg, n=10000, rn
             "p50": float(np.quantile(x, 0.50)),
             "p95": float(np.quantile(x, 0.95)),
         }
+
     return {
         "C": summarize(C_sim),
         "Nb": summarize(Nb_sim),
@@ -174,13 +225,25 @@ def monte_carlo_full(pred_mean_vec, pred_std_vec, inputs_fixed, cfg, n=10000, rn
     }
 
 # =========================
-# Excel parsing (robust)
+# Excel parsing (robust for Streamlit uploads)
 # =========================
-def _read_excel_all_sheets(file_or_path):
-    xls = pd.ExcelFile(file_or_path)
+def _to_bytes(uploaded_file):
+    if uploaded_file is None:
+        return None
+    try:
+        return uploaded_file.getvalue()
+    except Exception:
+        return None
+
+def _read_excel_all_sheets(file_bytes: bytes):
+    if file_bytes is None:
+        return []
+    bio = io.BytesIO(file_bytes)
+    # Force openpyxl for .xlsx
+    xls = pd.ExcelFile(bio, engine="openpyxl")
     dfs = []
     for sh in xls.sheet_names:
-        df = pd.read_excel(xls, sheet_name=sh, header=None)
+        df = pd.read_excel(xls, sheet_name=sh, header=None, engine="openpyxl")
         df["__sheet__"] = sh
         dfs.append(df)
     return dfs
@@ -206,6 +269,7 @@ def _standardize_colname(x: str) -> str:
 def _extract_element_columns(df):
     cols = [_standardize_colname(c) for c in df.columns]
     df.columns = cols
+
     def find_col(patterns):
         for c in df.columns:
             cl = c.lower()
@@ -213,62 +277,21 @@ def _extract_element_columns(df):
                 if re.search(p, cl):
                     return c
         return None
+
     mapping = {}
-    mapping["C"] = find_col([r"^c\b", r"c\("])
+    mapping["C"]  = find_col([r"^c\b",  r"c\("])
     mapping["Si"] = find_col([r"^si\b", r"si\("])
     mapping["Mn"] = find_col([r"^mn\b", r"mn\("])
     mapping["Nb"] = find_col([r"^nb\b", r"nb\("])
-    mapping["N"] = find_col([r"^n\b", r"n\("])
+    mapping["N"]  = find_col([r"^n\b",  r"n\("])
     mapping["Cr"] = find_col([r"^cr\b", r"cr\("])
     mapping["Ni"] = find_col([r"^ni\b", r"ni\("])
     mapping["Cu"] = find_col([r"^cu\b", r"cu\("])
     mapping["Mo"] = find_col([r"^mo\b", r"mo\("])
-    mapping["V"] = find_col([r"^v\b", r"v\("])
-    mapping["B"] = find_col([r"^b\b", r"b\("])
+    mapping["V"]  = find_col([r"^v\b",  r"v\("])
+    mapping["B"]  = find_col([r"^b\b",  r"b\("])
     mapping = {k: v for k, v in mapping.items() if v is not None}
     return mapping
-
-def parse_product_analysis(file_or_path, route_label: str, route_type: int):
-    dfs_raw = _read_excel_all_sheets(file_or_path)
-    if not dfs_raw:
-        return pd.DataFrame(), {"raw_rows": 0, "clean_rows": 0, "note": "No readable sheets"}
-    collected = []
-    raw_rows_total = 0
-    for raw in dfs_raw:
-        raw_rows_total += len(raw)
-        hdr = _find_header_row(raw)
-        if hdr is None:
-            continue
-        header = raw.iloc[hdr].astype(str).tolist()
-        data = raw.iloc[hdr+1:].copy()
-        data.columns = header
-        data = data.reset_index(drop=True)
-        data = data.dropna(axis=1, how="all")
-        mapping = _extract_element_columns(data)
-        if "C" not in mapping or "Mn" not in mapping or "Si" not in mapping:
-            continue
-        out = pd.DataFrame()
-        for std_name, col in mapping.items():
-            out[std_name] = data[col]
-        out = _coerce_numeric(out, ["C","Si","Mn","Nb","N","Cr","Ni","Cu","Mo","V","B"])
-        out["Route"] = route_label
-        out["process_type"] = int(route_type)
-        for el in ["Nb","N","Cr","Ni","Cu","Mo","V","B"]:
-            if el not in out.columns:
-                out[el] = 0.0
-            out[el] = out[el].fillna(0.0)
-        out_clean = out.dropna(subset=["C","Si","Mn"]).copy()
-        out_clean = out_clean[(out_clean["C"] >= 0) & (out_clean["C"] <= 0.25)]
-        out_clean = out_clean[(out_clean["Mn"] >= 0) & (out_clean["Mn"] <= 3.0)]
-        out_clean = out_clean[(out_clean["Si"] >= 0) & (out_clean["Si"] <= 1.5)]
-        if len(out_clean) > 0:
-            collected.append(out_clean)
-    if not collected:
-        return pd.DataFrame(), {"raw_rows": raw_rows_total, "clean_rows": 0, "note": "No chemistry table detected"}
-    df = pd.concat(collected, ignore_index=True)
-    df["process_type"] = pd.to_numeric(df["process_type"], errors="coerce").fillna(route_type).astype(int)
-    info = {"raw_rows": raw_rows_total, "clean_rows": len(df), "note": "OK"}
-    return df, info
 
 def _coerce_numeric(df, cols):
     for c in cols:
@@ -276,38 +299,96 @@ def _coerce_numeric(df, cols):
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
+def parse_product_analysis(file_bytes: bytes, route_label: str, route_type: int):
+    dfs_raw = _read_excel_all_sheets(file_bytes)
+    if not dfs_raw:
+        return pd.DataFrame(), {"raw_rows": 0, "clean_rows": 0, "note": "No readable sheets"}
+
+    collected = []
+    raw_rows_total = 0
+
+    for raw in dfs_raw:
+        raw_rows_total += len(raw)
+        hdr = _find_header_row(raw)
+        if hdr is None:
+            continue
+
+        header = raw.iloc[hdr].astype(str).tolist()
+        data = raw.iloc[hdr+1:].copy()
+        data.columns = header
+        data = data.reset_index(drop=True)
+        data = data.dropna(axis=1, how="all")
+
+        mapping = _extract_element_columns(data)
+        if "C" not in mapping or "Mn" not in mapping or "Si" not in mapping:
+            continue
+
+        out = pd.DataFrame()
+        for std_name, col in mapping.items():
+            out[std_name] = data[col]
+
+        out = _coerce_numeric(out, ["C","Si","Mn","Nb","N","Cr","Ni","Cu","Mo","V","B"])
+        out["Route"] = route_label
+        out["process_type"] = int(route_type)
+
+        for el in ["Nb","N","Cr","Ni","Cu","Mo","V","B"]:
+            if el not in out.columns:
+                out[el] = 0.0
+            out[el] = out[el].fillna(0.0)
+
+        out_clean = out.dropna(subset=["C","Si","Mn"]).copy()
+        out_clean = out_clean[(out_clean["C"] >= 0) & (out_clean["C"] <= 0.25)]
+        out_clean = out_clean[(out_clean["Mn"] >= 0) & (out_clean["Mn"] <= 3.0)]
+        out_clean = out_clean[(out_clean["Si"] >= 0) & (out_clean["Si"] <= 1.5)]
+
+        if len(out_clean) > 0:
+            collected.append(out_clean)
+
+    if not collected:
+        return pd.DataFrame(), {"raw_rows": raw_rows_total, "clean_rows": 0, "note": "No chemistry table detected"}
+
+    df = pd.concat(collected, ignore_index=True)
+    df["process_type"] = pd.to_numeric(df["process_type"], errors="coerce").fillna(route_type).astype(int)
+    info = {"raw_rows": raw_rows_total, "clean_rows": len(df), "note": "OK"}
+    return df, info
+
 @st.cache_data(show_spinner=False)
-def load_all_data(sdi_source, uss_source, additional_eaf, additional_bof):
+def load_all_data(sdi_bytes, uss_bytes, additional_eaf_bytes, additional_bof_bytes):
     sdi_df, sdi_info = (pd.DataFrame(), {"raw_rows": 0, "clean_rows": 0, "note": "None"})
     uss_df, uss_info = (pd.DataFrame(), {"raw_rows": 0, "clean_rows": 0, "note": "None"})
-    if sdi_source is not None:
-        sdi_df, sdi_info = parse_product_analysis(sdi_source, route_label="EAF", route_type=0)
-    if uss_source is not None:
-        uss_df, uss_info = parse_product_analysis(uss_source, route_label="BOF", route_type=1)
-    # Additional files
-    if additional_eaf:
-        for f in additional_eaf:
-            df_add, _ = parse_product_analysis(f, route_label="EAF", route_type=0)
+
+    if sdi_bytes is not None:
+        sdi_df, sdi_info = parse_product_analysis(sdi_bytes, route_label="EAF", route_type=0)
+    if uss_bytes is not None:
+        uss_df, uss_info = parse_product_analysis(uss_bytes, route_label="BOF", route_type=1)
+
+    if additional_eaf_bytes:
+        for b in additional_eaf_bytes:
+            df_add, _ = parse_product_analysis(b, route_label="EAF", route_type=0)
             sdi_df = pd.concat([sdi_df, df_add], ignore_index=True)
-    if additional_bof:
-        for f in additional_bof:
-            df_add, _ = parse_product_analysis(f, route_label="BOF", route_type=1)
+
+    if additional_bof_bytes:
+        for b in additional_bof_bytes:
+            df_add, _ = parse_product_analysis(b, route_label="BOF", route_type=1)
             uss_df = pd.concat([uss_df, df_add], ignore_index=True)
+
     common_cols = ["C","Si","Mn","Nb","N","Cr","Ni","Cu","Mo","V","B","process_type","Route"]
     frames = []
     if not sdi_df.empty:
         frames.append(sdi_df[common_cols])
     if not uss_df.empty:
         frames.append(uss_df[common_cols])
+
     if frames:
         df = pd.concat(frames, ignore_index=True)
     else:
         df = pd.DataFrame(columns=common_cols)
-    # Ensure numeric
+
     for c in ["C","Si","Mn","Nb","N","Cr","Ni","Cu","Mo","V","B","process_type"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     df["process_type"] = df["process_type"].fillna(0).astype(int)
+
     return df, {"sdi": sdi_info, "uss": uss_info}
 
 # =========================
@@ -320,9 +401,12 @@ def train_model(df):
     df_clean = df.dropna(subset=["Mn","N","Cr","Ni","Cu","process_type","C","Nb","Si"]).copy()
     if len(df_clean) < 12:
         return None, None, None, "Model not trained (insufficient clean rows)."
+
     X = df_clean[["Mn","N","Cr","Ni","Cu","process_type"]].astype(float)
     y = df_clean[["C","Nb","Si"]].astype(float)
+
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
     base = XGBRegressor(
         n_estimators=400,
         max_depth=4,
@@ -335,8 +419,10 @@ def train_model(df):
     )
     model = MultiOutputRegressor(base)
     model.fit(X_train, y_train)
+
     y_pred = model.predict(X_test)
     rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
+
     stats = df_clean.groupby("process_type")[["C","Nb","Si"]].agg(["mean","std"])
     return model, rmse, stats, "OK"
 
@@ -351,10 +437,16 @@ additional_eaf = st.sidebar.file_uploader("Additional EAF files", type=["xlsx"],
 additional_bof = st.sidebar.file_uploader("Additional BOF files", type=["xlsx"], accept_multiple_files=True, key="add_bof")
 st.sidebar.caption("Multiple files allowed. All will be concatenated into training data.")
 
+# Convert uploads to bytes (robust + cacheable)
+sdi_bytes = _to_bytes(sdi_upload)
+uss_bytes = _to_bytes(uss_upload)
+additional_eaf_bytes = [f.getvalue() for f in (additional_eaf or [])]
+additional_bof_bytes = [f.getvalue() for f in (additional_bof or [])]
+
 # =========================
 # Load data + train model
 # =========================
-df, info = load_all_data(sdi_upload, uss_upload, additional_eaf, additional_bof)
+df, info = load_all_data(sdi_bytes, uss_bytes, additional_eaf_bytes, additional_bof_bytes)
 model, rmse, stats, train_msg = train_model(df)
 
 # =========================
@@ -363,7 +455,6 @@ model, rmse, stats, train_msg = train_model(df)
 st.title("Steel Chemistry + HAZ Toughness Predictor (Screening Tool)")
 st.caption("CVN shown in Joules (optionally ft-lb). CTOD shown in mm (optionally inches).")
 
-# Status / counts
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("SDI rows (raw / clean)", f"{info['sdi']['raw_rows']} / {info['sdi']['clean_rows']}")
 c2.metric("USS rows (raw / clean)", f"{info['uss']['raw_rows']} / {info['uss']['clean_rows']}")
@@ -386,23 +477,34 @@ with tab1:
     if model is None:
         st.warning(train_msg)
         st.stop()
+
     left, right = st.columns([1, 2])
+
     with left:
         st.markdown("### Process Inputs")
         process = st.selectbox("Manufacturing Route", ["EAF", "BOF"], index=1)
         process_type_input = 0 if process == "EAF" else 1
+
         Mn_in = st.number_input("Mn (%)", value=1.25, step=0.01, format="%.3f")
         N_in = st.number_input("N (%)", value=0.009 if process_type_input == 0 else 0.002, step=0.001, format="%.4f")
         Cr_in = st.number_input("Cr (%)", value=0.06, step=0.01, format="%.3f")
         Ni_in = st.number_input("Ni (%)", value=0.05, step=0.01, format="%.3f")
         Cu_in = st.number_input("Cu (%)", value=0.12, step=0.01, format="%.3f")
+
         st.markdown("---")
         st.caption("Trace elements for Pcm (used as-entered)")
         Mo_in = st.number_input("Mo (%)", value=0.02, step=0.01, format="%.3f")
         V_in = st.number_input("V (%)", value=0.005, step=0.001, format="%.3f")
         B_in = st.number_input("B (%)", value=0.0005, step=0.0001, format="%.4f")
+
         st.markdown("---")
-        yield_strength_mpa = st.number_input("Assumed yield strength (MPa) for CTOD screening", value=550.0, step=10.0, format="%.1f")
+        yield_strength_mpa = st.number_input(
+            "Assumed yield strength (MPa) for CTOD screening",
+            value=550.0,
+            step=10.0,
+            format="%.1f",
+        )
+
         st.markdown("---")
         st.markdown("### Drop-down assumptions (used in calculations)")
         grade_family = st.selectbox("Grade family", ["X65", "X70", "X80", "Other / Mixed"], index=1)
@@ -413,14 +515,17 @@ with tab1:
         heat_input = st.selectbox("Heat input level", ["Low", "Medium", "High"], index=1)
         t85 = st.selectbox("Cooling time t8/5", ["Short (fast cooling)", "Medium", "Long (slow cooling)"], index=0)
         kmat_method = st.selectbox("Screening CVN→K mapping", ["BS7910_linear", "FITNET_linear"], index=0)
+
         if product_form in ["Pipe (thick)", "Plate (thick)"]:
             constraint_factor = 0.85
         else:
             constraint_factor = 0.92
+
         guard_warn = temperature_regime in ["Transition / mixed", "Lower shelf (cleavage risk)", "Unknown"]
-        guard_force = temperature_regime == "Lower shelf (cleavage risk)"
         disable_toughness = st.checkbox("Disable CVN/CTOD screening (chemistry + Pcm only)", value=False)
+
         predict_btn = st.button("Run Prediction", type="primary")
+
     with right:
         if predict_btn:
             cfg = {
@@ -435,26 +540,31 @@ with tab1:
                 "disable_toughness": bool(disable_toughness),
                 "constraint_factor": float(constraint_factor),
                 "guard_warn": bool(guard_warn),
-                "guard_force": bool(guard_force),
                 "pcm_threshold": 0.14,
                 "pcm_sensitivity": 18.0,
             }
+
             input_data = np.array([[Mn_in, N_in, Cr_in, Ni_in, Cu_in, float(process_type_input)]], dtype=float)
             pred = model.predict(input_data)[0]
             pred_C, pred_Nb, pred_Si = float(pred[0]), float(pred[1]), float(pred[2])
+
             st.markdown("### 1) Predicted Chemistry")
             a, b, c = st.columns(3)
             a.metric("C (%)", f"{pred_C:.4f}")
             b.metric("Nb (%)", f"{pred_Nb:.4f}")
             c.metric("Si (%)", f"{pred_Si:.4f}")
+
             pcm_value = float(calculate_pcm(pred_C, pred_Si, Mn_in, Cu_in, Cr_in, Ni_in, Mo_in, V_in, B_in))
             st.markdown("### 2) Weldability / Hardenability (Pcm)")
             st.metric("Pcm", f"{pcm_value:.4f}")
+
             st.markdown("### 3) Screening Toughness Outputs (Optional)")
             if cfg["guard_warn"]:
                 st.warning("Selected temperature regime is not 'Upper shelf'. Treat CVN→CTOD as conservative screening only.")
+
             cvn_j = estimate_cvn_screening_j(pcm_value, process_type_input, cfg)
             cvn_ftlb = joule_to_ftlb(cvn_j)
+
             if cfg["disable_toughness"]:
                 st.info("Toughness conversion disabled. Showing chemistry + Pcm only.")
             else:
@@ -466,15 +576,17 @@ with tab1:
                 k3.metric("Screening CTOD", f"{ctod_mm:.3f} mm")
                 st.caption(f"CTOD ≈ {ctod_in:.4f} in")
                 st.caption("Screening only. Replace with measured CVN/CTOD for qualification/acceptance.")
+
             st.markdown("### 4) Monte Carlo Uncertainty (Chemistry + Derived Metrics)")
             if stats is None or process_type_input not in stats.index:
                 st.warning("Monte Carlo unavailable: route stats not available.")
             else:
                 route_stats = stats.loc[process_type_input]
-                std_C = float(route_stats[("C","std")]) if ("C","std") in route_stats.index else np.nan
+                std_C  = float(route_stats[("C","std")])  if ("C","std")  in route_stats.index else np.nan
                 std_Nb = float(route_stats[("Nb","std")]) if ("Nb","std") in route_stats.index else np.nan
                 std_Si = float(route_stats[("Si","std")]) if ("Si","std") in route_stats.index else np.nan
                 std_vec = np.array([std_C, std_Nb, std_Si], dtype=float)
+
                 if np.any(~np.isfinite(std_vec)) or np.any(std_vec <= 0):
                     st.warning("Monte Carlo unavailable: route standard deviations could not be computed reliably.")
                 else:
@@ -486,9 +598,11 @@ with tab1:
                     )
                     mc = monte_carlo_full(pred_mean_vec=pred, pred_std_vec=std_vec, inputs_fixed=inputs_fixed, cfg=cfg, n=10000)
                     sC = mc["C"]; sP = mc["Pcm"]; sV = mc["CVN_J"]; sD = mc["CTOD_mm"]
+
                     st.write(f"**C (P5/P50/P95):** {sC['p05']:.4f} / {sC['p50']:.4f} / {sC['p95']:.4f} %")
                     st.write(f"**Pcm (P5/P50/P95):** {sP['p05']:.3f} / {sP['p50']:.3f} / {sP['p95']:.3f}")
                     st.write(f"**CVN (P5/P50/P95):** {sV['p05']:.0f} / {sV['p50']:.0f} / {sV['p95']:.0f} J")
+
                     if cfg["disable_toughness"]:
                         st.info("CTOD not computed (disabled).")
                     else:
@@ -496,7 +610,7 @@ with tab1:
                         ctod_threshold = 0.10
                         prob_low = float(np.mean(mc["raw"]["CTOD_mm"] < ctod_threshold) * 100.0)
                         st.write(f"**P(CTOD < {ctod_threshold:.2f} mm):** {prob_low:.1f}%")
-                    if not cfg["disable_toughness"]:
+
                         fig, ax = plt.subplots(figsize=(8, 3))
                         ax.hist(mc["raw"]["CTOD_mm"], bins=50, edgecolor="black", alpha=0.85)
                         ax.set_xlabel("CTOD (mm)")
